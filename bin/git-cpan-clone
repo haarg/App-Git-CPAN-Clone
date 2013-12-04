@@ -1,0 +1,66 @@
+#!/usr/bin/env perl
+package App::Git::CPAN::Clone;
+use strictures;
+use HTTP::Tiny;
+use JSON::MaybeXS qw(JSON);
+
+run(@ARGV);
+
+sub run {
+  my $module = shift;
+  my $ua = HTTP::Tiny->new;
+  my $json = JSON->new;
+  my $response = $ua->get("http://api.metacpan.org/module/$module?fields=author,release,distribution");
+  die "Failed: $response->{status} $response->{reason}!\n" unless $response->{success};
+  my $data = $json->decode($response->{content});
+  my $dist = $data->{distribution};
+  $response = $ua->get("http://api.metacpan.org/release/$data->{author}/$data->{release}?fields=resources.repository");
+  die "Failed: $response->{status} $response->{reason}!\n" unless $response->{success};
+  $data = $json->decode($response->{content});
+  my $repo = $data->{'resources.repository'};
+  if (!$repo) {
+    die "no repo!\n";
+  }
+  my $type;
+  my $url;
+  if (ref $repo) {
+    $type = $repo->{type};
+    $url = $repo->{url};
+  }
+  else {
+    $url = $repo;
+  }
+  if (!$type) {
+    if ($url =~ m{\bgithub\.com/([^/]+)/([^/]+)}) {
+      $type = 'git';
+      $url = "git://github.com/$1/$2";
+      $url =~ s/\.git$//;
+    }
+    elsif ($url =~ /git/) {
+      $type = 'git';
+    }
+    elsif ($url =~ /hg|mercurial/) {
+      $type = 'hg';
+    }
+    elsif ($url =~ /svn/) {
+      $type = 'svn';
+    }
+    elsif ($url =~ /bzr|bazaar/) {
+      $type = 'bzr';
+    }
+    else {
+      die "don't know what to do with repo: $url\n";
+    }
+  }
+  if ($type eq 'hg') {
+    $url = "hg::$url";
+  }
+  elsif ($type eq 'bzr') {
+    $url = "bzr::$url";
+  }
+  elsif ($type eq 'svn') {
+    die "svn repo: $url\n";
+  }
+  exec 'git', 'clone', $url, $dist;
+}
+
